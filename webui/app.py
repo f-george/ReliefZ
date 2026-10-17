@@ -41,8 +41,10 @@ def create_app(engine=None):
 
     @app.post("/api/explain")
     def explain():
-        body = request.get_json(silent=True) or {}
+        body = request.get_json(silent=True)
         try:
+            if not isinstance(body, dict):
+                raise ValueError("request body must be a JSON object")
             return jsonify(eng.explain(body.get("facts")))
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

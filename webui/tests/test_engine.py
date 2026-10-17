@@ -142,3 +142,35 @@ def test_api(eng):
     assert {"risk_score", "action", "options", "routes", "hazard", "explanation", "facts"} <= body.keys()
     assert client.post("/api/simulate", json={"type": "volcano"}).status_code == 400
     assert client.post("/api/simulate", data="not json").status_code == 400
+
+
+@pytest.mark.parametrize("body", [
+    {"location": []}, {"location": {}}, {"type": []}, {"type": {}},
+    {"disaster": []}, {"factors": []}, {"overrides": {}},
+    {"backup_hub_available": "false"}, {"backup_hub_available": 0},
+    {"disaster": {"severity": "Infinity"}}, {"disaster": {"severity": "NaN"}},
+])
+def test_api_rejects_malformed_simulation_inputs(eng, body):
+    response = create_app(eng).test_client().post("/api/simulate", json=body)
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+@pytest.mark.parametrize("body", [[1], "explain", 123, {}, {"facts": []}])
+def test_api_rejects_malformed_explanation_inputs(eng, body):
+    response = create_app(eng).test_client().post("/api/explain", json=body)
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+
+
+def test_platform_evidence_matches_server(eng):
+    import platform
+
+    response = create_app(eng).test_client().get("/api/scenario").get_json()
+    assert response["platform"] == {"machine": platform.machine(), "python": platform.python_version()}
+
+
+def test_missing_models_explain_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.ART", tmp_path)
+    with pytest.raises(FileNotFoundError, match="scripts/prepare_demo.py"):
+        Engine()

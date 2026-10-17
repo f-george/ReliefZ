@@ -1,0 +1,11 @@
+# Training, routing and template explanations; no native LLM build required.
+# Use the preinstalled packages in the official LinuxONE container instead of reinstalling them.
+scikit-learn==1.9.0
+xgboost==3.4.1
+networkx==3.7
+pandas==3.0.6
+numpy
+matplotlib
+joblib
+requests
+jupyterlab

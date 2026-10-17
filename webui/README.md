@@ -1,4 +1,4 @@
-# ReliefSync Z — disaster simulator web UI
+# ReliefSync Z - disaster simulator web UI
 
 An interactive front end for the ReliefSync Z models, served from IBM LinuxONE. Pick a location and a disaster
 (**flood**, **severe storm** (shown as **typhoon** in Japan) or **landslide**), place it anywhere along that
@@ -33,6 +33,9 @@ web UI needs no internet access on LinuxONE. All other data is simulated.
 
 The engine loads the models trained by notebooks 01–03 (`artifacts/`), so run those on LinuxONE first. It reuses
 the routing and decision logic from notebooks 04 and 05.
+=======
+The engine loads the models trained by notebooks 01–03 (`artifacts/`), so run those on LinuxONE first. It reuses
+the routing and decision logic from notebooks 04 and 05.
 
 Three risk factors are calculated from where you place the disaster:
 - **Distance to hazard:** how far the convoy travels along its route before reaching the disaster zone.
@@ -51,7 +54,7 @@ machine's byte order, which is big-endian on IBM Z.
   through an encrypted SSH tunnel; don't open the port publicly.
 - **No outside calls:** all inference, including Granite, runs on LinuxONE. The only external requests are the
   OpenStreetMap map tiles, which your browser loads directly.
-
+  
 ## Tests
 
 Inside the LinuxONE container, from the project folder:

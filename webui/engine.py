@@ -161,8 +161,8 @@ def _clamp(value, slider):
         value = float(value)
     except (TypeError, ValueError):
         raise ValueError(f"{slider['key']} must be a number")
-    if math.isnan(value):
-        raise ValueError(f"{slider['key']} must be a number")
+    if not math.isfinite(value):
+        raise ValueError(f"{slider['key']} must be a finite number")
     return min(max(value, slider["min"]), slider["max"])
 
 
@@ -340,6 +340,12 @@ class Scenario:
 # --------------------------------------------------------------------------- engine
 class Engine:
     def __init__(self):
+        required = ["feature_spec.json", "model1_rf.joblib", "model2_rf.joblib"]
+        missing = [name for name in required if not (ART / name).is_file()]
+        if missing:
+            raise FileNotFoundError(
+                f"Missing model artifacts: {', '.join(missing)}. "
+                "Run python scripts/prepare_demo.py or notebooks 01-03 on this machine first.")
         self.spec = json.loads((ART / "feature_spec.json").read_text())
         self.m1_features = self.spec["model1_features"]
         self.m2_features = self.spec["model2_categorical"] + self.spec["model2_numeric"]
@@ -389,7 +395,7 @@ class Engine:
         }
 
     def get_scenario(self, location):
-        if location not in self.scenarios:
+        if not isinstance(location, str) or location not in self.scenarios:
             raise ValueError(f"location must be one of {sorted(self.scenarios)}")
         return self.scenarios[location]
 
@@ -426,11 +432,11 @@ class Engine:
         location = body.get("location", DEFAULT_LOCATION)
         self.get_scenario(location)      # validates
         dtype = body.get("type", "flood")
-        if dtype not in DISASTER_TYPES:
+        if not isinstance(dtype, str) or dtype not in DISASTER_TYPES:
             raise ValueError(f"type must be one of {sorted(DISASTER_TYPES)}")
         preset = DISASTER_TYPES[dtype]
-        disaster_in = body.get("disaster") or {}
-        factors_in = body.get("factors") or {}
+        disaster_in = body.get("disaster", {})
+        factors_in = body.get("factors", {})
         if not isinstance(disaster_in, dict) or not isinstance(factors_in, dict):
             raise ValueError("disaster and factors must be JSON objects")
         disaster = {s["key"]: _clamp(disaster_in.get(s["key"], preset["disaster"].get(s["key"], s["default"])), s)
@@ -438,12 +444,14 @@ class Engine:
         factors = {s["key"]: _clamp(factors_in.get(s["key"], preset["factors"].get(s["key"], s["default"])), s)
                    for s in FACTOR_SLIDERS}
         factors["road_closure_nearby"] = int(round(factors["road_closure_nearby"]))
-        overrides = body.get("overrides") or []
+        overrides = body.get("overrides", [])
         if not isinstance(overrides, list):
             raise ValueError("overrides must be a list")
         overrides = [k for k in overrides if k in preset["auto_factors"]]
         cargo = int(round(_clamp(body.get("cargo_priority", CARGO_SLIDER["default"]), CARGO_SLIDER)))
-        hub_allowed = bool(body.get("backup_hub_available", True))
+        hub_allowed = body.get("backup_hub_available", True)
+        if not isinstance(hub_allowed, bool):
+            raise ValueError("backup_hub_available must be a boolean")
         return location, dtype, disaster, factors, overrides, cargo, hub_allowed
 
     # ----------------------------------------------------------------------- main entry point
