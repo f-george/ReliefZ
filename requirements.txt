@@ -1,11 +1,3 @@
 # Pinned to match the official LinuxONE Community Cloud Jupyter Lab ML container (jupyterlab-image-s390x)
-scikit-learn==1.9.0
-xgboost==3.4.1
-networkx==3.7
-pandas==3.0.6
+-r requirements-core.txt
 llama-cpp-python==0.3.36
-numpy
-matplotlib
-joblib
-requests
-jupyterlab

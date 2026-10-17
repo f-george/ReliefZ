@@ -11,6 +11,14 @@ logs/
 webui/frontend/node_modules/
 .pytest_cache/
 
+# Local credentials and temporary review output
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+tmp/
+
 # Granite GGUF model files (multi-GB; download or use the container's model)
 models/
 

@@ -1,8 +1,3 @@
-# Open-source resources used
-
-The datathon rules (rule 5) require links to every open-source library and framework used. Every component of
-ReliefSync Z is open source or open data. No proprietary service or API is used.
-
 ## Libraries and frameworks
 
 | Component | Used for | Licence | Link |
