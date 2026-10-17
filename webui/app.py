@@ -7,7 +7,7 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from engine import Engine, GraniteUnavailable
+from engine import DEFAULT_LOCATION, Engine, GraniteUnavailable
 
 DIST = Path(__file__).resolve().parent / "frontend" / "dist"
 
@@ -19,11 +19,18 @@ def create_app(engine=None):
 
     @app.get("/api/scenario")
     def scenario():
-        return jsonify(eng.scenario())
+        try:
+            return jsonify(eng.scenario(request.args.get("location", DEFAULT_LOCATION)))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
 
     @app.get("/api/network")
     def network():
-        return Response(eng.network_json, mimetype="application/json")
+        try:
+            sc = eng.get_scenario(request.args.get("location", DEFAULT_LOCATION))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return Response(sc.network_json, mimetype="application/json")
 
     @app.post("/api/simulate")
     def simulate():

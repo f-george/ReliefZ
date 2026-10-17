@@ -28,7 +28,8 @@ the libraries, model and data used, with links and licences.
 ## Interactive web UI (`webui/`)
 
 A browser-based disaster simulator for the demo video:
-- choose a flood, severe storm or landslide;
+- choose a location: Valencia, Spain or the Noto Peninsula, Japan;
+- choose a flood, severe storm (typhoon in Japan) or landslide;
 - place it anywhere along the convoy's fixed route;
 - adjust every risk factor with sliders.
 

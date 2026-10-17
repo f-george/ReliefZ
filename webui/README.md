@@ -1,22 +1,39 @@
 # ReliefSync Z — disaster simulator web UI
 
-An interactive front end for the ReliefSync Z models. Pick a disaster (**flood**, **severe storm** or
-**landslide**), place it anywhere along a fixed 15.3 km convoy route in Valencia, and adjust every risk factor
-with sliders. The page shows, live:
+An interactive front end for the ReliefSync Z models. Pick a location and a disaster (**flood**, **severe storm**
+(shown as **typhoon** in Japan) or **landslide**), place it anywhere along that location's fixed convoy route, and
+adjust every risk factor with sliders. The page shows, live:
 - the route risk (Model 1);
 - the recommended action (Model 2): **CONTINUE**, **HALT**, **REROUTE** or **DIVERT TO HUB**;
 - the route options compared;
 - what drives the risk;
 - an explanation, with an optional one from IBM Granite running locally.
 
-All data is simulated. The route and road network come from the cached OpenStreetMap extract in
-`data/road_graph.json`.
+All data is simulated. Road networks are cached OpenStreetMap extracts in `data/`.
+
+## Locations
+
+| Location | Route | Backup hub | Why it's here |
+|---|---|---|---|
+| Valencia, Spain | Depot → destination, 15.3 km (city roads) | Map corner | The October 2024 DANA floods |
+| Noto Peninsula, Japan | Anamizu (relief staging) → Wajima, 23.3 km (rural, few detours) | Noto Airport, a relief base in 2024 | The 2024 Noto earthquake and the September 2024 floods and landslides that cut roads to Wajima |
+
+Each location is defined in `locations.py`. Valencia's graph comes from notebook 04
+(`data/road_graph.json`); Noto's was downloaded with `python webui/locations.py noto`
+(`data/road_graph_noto.json`).
+
+To add a location:
+1. Add an entry to `LOCATIONS` with a bounding box and the origin, destination and hub coordinates.
+2. Run `python webui/locations.py <key>` once, and commit the new `data/road_graph_<key>.json`.
+
+Nothing else changes, because the models are not tied to a place.
 
 ## How it works
 
 | Part | Technology | Location |
 |---|---|---|
 | Simulation engine | Python: scikit-learn, NetworkX, NumPy; llama.cpp for Granite | `engine.py` |
+| Locations + road network downloader | Python, Overpass API (OpenStreetMap) | `locations.py` |
 | API + static file server | Flask | `app.py` |
 | User interface | React + Tailwind CSS (built with Vite), Leaflet map | `frontend/` (built files in `frontend/dist/`) |
 
@@ -81,8 +98,8 @@ then the container's preinstalled Granite model. On IBM Z the model file must be
 .venv/bin/pytest webui/tests
 ```
 
-The tests check:
-- the route never changes;
+The tests check, for both locations:
+- each location keeps its own fixed route and labels (e.g. Typhoon in Japan);
 - outputs stay in valid ranges;
 - weak disasters lead to CONTINUE;
 - a closer flood is riskier;

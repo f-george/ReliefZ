@@ -28,9 +28,9 @@ export default function MapView({ scenario, network, result }) {
     }).addTo(m);
     const route = L.polyline(scenario.route, { color: "#334155", weight: 5, opacity: 0.85 }).addTo(m);
     dynamic.current = L.layerGroup().addTo(m);
-    pin(scenario.origin, "#0f172a", "Convoy RZ-01 (start)").addTo(m);
-    pin(scenario.destination, "#16a34a", "Destination").addTo(m);
-    pin(scenario.hub, "#f97316", "Backup hub").addTo(m);
+    pin(scenario.origin, "#0f172a", `Convoy RZ-01 at ${scenario.names.origin}`).addTo(m);
+    pin(scenario.destination, "#16a34a", `Destination: ${scenario.names.destination}`).addTo(m);
+    pin(scenario.hub, "#f97316", `Backup hub: ${scenario.names.hub}`).addTo(m);
     m.fitBounds(route.getBounds().pad(0.15));
     map.current = m;
     return () => {
@@ -43,10 +43,9 @@ export default function MapView({ scenario, network, result }) {
   // Faint road network underneath, so the map is readable even if tiles cannot load
   useEffect(() => {
     if (!map.current || !network) return undefined;
-    const layer = L.polyline(
-      network.map((s) => [[s[0], s[1]], [s[2], s[3]]]),
-      { color: "#64748b", weight: 1, opacity: 0.35, interactive: false },
-    ).addTo(map.current);
+    const layer = L.polyline(network, { color: "#64748b", weight: 1, opacity: 0.35, interactive: false }).addTo(
+      map.current,
+    );
     layer.bringToBack();
     return () => layer.remove();
   }, [scenario, network]);
@@ -80,6 +79,12 @@ export default function MapView({ scenario, network, result }) {
   return (
     <div className="relative h-full min-h-[24rem]">
       <div ref={container} className="absolute inset-0" />
+      <div className="pointer-events-none absolute top-2 right-2 left-14 z-[1000] flex justify-end">
+        <p className="max-w-md rounded-md bg-white/90 px-3 py-1.5 text-[11px] text-slate-700 shadow">
+          <span className="font-semibold">{scenario.label}.</span> {scenario.context}{" "}
+          {scenario.names.origin} → {scenario.names.destination}, {scenario.route_km} km.
+        </p>
+      </div>
       <div className="pointer-events-none absolute bottom-6 left-2 z-[1000] hidden rounded-md bg-white/90 px-3 py-2 text-[11px] shadow sm:block">
         {LEGEND.map((item) => (
           <div key={item.label} className="flex items-center gap-2 py-0.5">

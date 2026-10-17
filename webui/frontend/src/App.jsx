@@ -11,6 +11,7 @@ import OptionsTable from "./components/OptionsTable.jsx";
 const defaultsOf = (sliders) => Object.fromEntries(sliders.map((s) => [s.key, s.default]));
 
 export default function App() {
+  const [location, setLocation] = useState("valencia");
   const [scenario, setScenario] = useState(null);
   const [network, setNetwork] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -28,20 +29,29 @@ export default function App() {
   const [granite, setGranite] = useState({ status: "idle" });
   const graniteRequest = useRef(0);
 
+  // Load the scenario (route, sliders, labels) and road network for the selected location
   useEffect(() => {
-    getJSON("/api/scenario")
+    let cancelled = false;
+    setResult(null);
+    setNetwork(null);
+    getJSON(`/api/scenario?location=${location}`)
       .then((s) => {
+        if (cancelled) return;
         setScenario(s);
         setType(s.default_type);
         setDisaster(defaultsOf(s.disaster_sliders));
         setFactors(defaultsOf(s.factor_sliders));
+        setOverrides([]);
         setCargo(s.cargo_slider.default);
       })
-      .catch((e) => setLoadError(e.message));
-    getJSON("/api/network")
-      .then((n) => setNetwork(n.segments))
+      .catch((e) => !cancelled && setLoadError(e.message));
+    getJSON(`/api/network?location=${location}`)
+      .then((n) => !cancelled && setNetwork(n.lines))
       .catch(() => {});
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [location]);
 
   // Re-simulate when any input changes: debounced, and stale requests are cancelled
   useEffect(() => {
@@ -53,7 +63,15 @@ export default function App() {
       setPending(true);
       postJSON(
         "/api/simulate",
-        { type, disaster, factors, overrides, cargo_priority: cargo, backup_hub_available: hubAvailable },
+        {
+          location: scenario.location,
+          type,
+          disaster,
+          factors,
+          overrides,
+          cargo_priority: cargo,
+          backup_hub_available: hubAvailable,
+        },
         controller.signal,
       )
         .then((r) => {
@@ -117,6 +135,22 @@ export default function App() {
         <div>
           <h1 className="text-lg font-semibold">ReliefSync Z</h1>
           <p className="text-xs text-slate-300">Disaster convoy decision simulator</p>
+        </div>
+        <div className="flex gap-1 rounded-lg bg-slate-800 p-1" role="radiogroup" aria-label="Location">
+          {scenario.locations.map((loc) => (
+            <button
+              key={loc.key}
+              type="button"
+              role="radio"
+              aria-checked={location === loc.key}
+              onClick={() => setLocation(loc.key)}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition ${
+                location === loc.key ? "bg-white text-slate-900" : "text-slate-300 hover:text-white"
+              }`}
+            >
+              {loc.label}
+            </button>
+          ))}
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
           <span className="rounded bg-amber-400 px-2 py-0.5 font-semibold text-slate-900">Simulated data</span>

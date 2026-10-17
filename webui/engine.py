@@ -3,9 +3,9 @@
 Ports the routing layer (notebooks/04_routing.ipynb) and the decision pipeline (notebooks/05_live_pipeline_demo.ipynb)
 into an importable module. It loads the files the notebooks produce, so run notebooks 01-04 first.
 
-The scenario is fixed: one convoy at the start of one simulated route through the cached OpenStreetMap road graph.
-The user places a disaster somewhere along that route and adjusts the risk factors; the engine returns the
-route risk (Model 1), the recommended action (Model 2) and the route options.
+Each location (see locations.py) is a fixed scenario: one convoy at the start of one simulated route through that
+location's cached OpenStreetMap road graph. The user places a disaster somewhere along the route and adjusts the
+risk factors; the engine returns the route risk (Model 1), the recommended action (Model 2) and the route options.
 """
 import importlib.util
 import json
@@ -22,6 +22,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
+from locations import LOCATIONS
+
 ROOT = Path(__file__).resolve().parent.parent
 ART = ROOT / "artifacts"
 DATA = ROOT / "data"
@@ -33,6 +35,7 @@ MAX_HAZARD_DISTANCE_KM = 50.0
 # Web UI additions
 ZONE_THRESHOLD = 0.1      # edge hazard at which a route counts as entering the hazard zone
 REGIONAL_FLOOD_BASELINE = 0.10
+DEFAULT_LOCATION = "valencia"
 
 DISASTER_TYPES = {
     "flood": {
@@ -194,70 +197,75 @@ def gguf_byte_order(path):
     return "little" if int.from_bytes(version, "little") < 65536 else "big"
 
 
-# --------------------------------------------------------------------------- engine
-class Engine:
-    def __init__(self):
-        self.spec = json.loads((ART / "feature_spec.json").read_text())
-        self.m1_features = self.spec["model1_features"]
-        self.m2_features = self.spec["model2_categorical"] + self.spec["model2_numeric"]
-        self.threshold = self.spec["risk_threshold"]
-        self.calm = self.spec["calm_reference"]
-        self.model1 = joblib.load(ART / "model1_rf.joblib")
-        self.model2 = joblib.load(ART / "model2_rf.joblib")
-        self.model1.set_params(n_jobs=1)
-        self.model2.set_params(rf__n_jobs=1)
+# --------------------------------------------------------------------------- scenarios
+def polylines(G):
+    """Road network as polylines for the map: chains of degree-2 nodes are merged to keep the payload small."""
+    seen, lines = set(), []
 
-        G = self.G = load_graph(DATA / "road_graph.json")
+    def walk(start, nxt):
+        line, prev, cur = [start, nxt], start, nxt
+        seen.add(frozenset((start, nxt)))
+        while G.degree(cur) == 2:
+            a, b = G.neighbors(cur)
+            step = b if a == prev else a
+            if frozenset((cur, step)) in seen:
+                break
+            seen.add(frozenset((cur, step)))
+            line.append(step)
+            prev, cur = cur, step
+        return line
+
+    for n in G.nodes:
+        if G.degree(n) != 2:
+            for m in G.neighbors(n):
+                if frozenset((n, m)) not in seen:
+                    lines.append(walk(n, m))
+    for u, v in G.edges:     # loops made only of degree-2 nodes
+        if frozenset((u, v)) not in seen:
+            lines.append(walk(u, v))
+    return [[[round(G.nodes[n]["lat"], 5), round(G.nodes[n]["lon"], 5)] for n in line] for line in lines]
+
+
+class Scenario:
+    """One location: its road graph, the convoy's fixed route, and the map payload."""
+
+    def __init__(self, key):
+        self.key, self.cfg = key, LOCATIONS[key]
+        G = self.G = load_graph(self.cfg["graph"])
         edges = list(G.edges)
         for eid, (u, v) in enumerate(edges):
             G[u][v]["eid"] = eid
         self.edge_mid_lat = np.array([(G.nodes[u]["lat"] + G.nodes[v]["lat"]) / 2 for u, v in edges])
         self.edge_mid_lon = np.array([(G.nodes[u]["lon"] + G.nodes[v]["lon"]) / 2 for u, v in edges])
 
-        self.origin, self.destination, self.hub = pick_endpoints(G)
+        if self.cfg["endpoints"]:
+            self.origin, self.destination, self.hub = (
+                self.nearest_node(*self.cfg["endpoints"][k]) for k in ("origin", "destination", "hub"))
+        else:
+            self.origin, self.destination, self.hub = pick_endpoints(G)
         self.baseline = nx.shortest_path(G, self.origin, self.destination, weight="travel_min")
         seg = [G[u][v]["length_km"] for u, v in zip(self.baseline[:-1], self.baseline[1:])]
         self.baseline_cum_km = np.concatenate([[0.0], np.cumsum(seg)])
         self.route_km = float(self.baseline_cum_km[-1])
+        self.network_json = json.dumps({"lines": polylines(G)})
 
-        self.network_json = json.dumps({"segments": [
-            [round(G.nodes[u]["lat"], 5), round(G.nodes[u]["lon"], 5),
-             round(G.nodes[v]["lat"], 5), round(G.nodes[v]["lon"], 5)] for u, v in edges]})
+    def nearest_node(self, lat, lon):
+        nodes = list(self.G.nodes)
+        lats = np.array([self.G.nodes[n]["lat"] for n in nodes])
+        lons = np.array([self.G.nodes[n]["lon"] for n in nodes])
+        return nodes[int(np.argmin(haversine_km(lats, lons, lat, lon)))]
 
-        self._granite = None
-        self._granite_path = None
-        self._granite_error = None
-        self._granite_lock = threading.Lock()
+    def type_label(self, dtype):
+        return self.cfg["type_labels"].get(dtype, DISASTER_TYPES[dtype]["label"])
 
-    # ----------------------------------------------------------------------- scenario description
+    def type_short(self, dtype):
+        return self.cfg["type_labels"].get(dtype, DISASTER_TYPES[dtype]["short"])
+
     def coords(self, path):
         return [[round(self.G.nodes[n]["lat"], 5), round(self.G.nodes[n]["lon"], 5)] for n in path]
 
     def node_coords(self, n):
         return [self.G.nodes[n]["lat"], self.G.nodes[n]["lon"]]
-
-    def scenario(self):
-        defaults = DISASTER_TYPES["flood"]
-        return {
-            "route": self.coords(self.baseline),
-            "route_km": round(self.route_km, 2),
-            "origin": self.node_coords(self.origin),
-            "destination": self.node_coords(self.destination),
-            "hub": self.node_coords(self.hub),
-            "threshold": self.threshold,
-            "disaster_types": {k: {key: v[key] for key in ("label", "short", "color", "auto_factors", "disaster",
-                                                          "factors")}
-                               for k, v in DISASTER_TYPES.items()},
-            "default_type": "flood",
-            "disaster_sliders": [{**s, "default": defaults["disaster"].get(s["key"], s["default"])}
-                                 for s in DISASTER_SLIDERS],
-            "factor_sliders": [{**s, "default": defaults["factors"].get(s["key"], s["default"])}
-                               for s in FACTOR_SLIDERS],
-            "cargo_slider": CARGO_SLIDER,
-            "actions": ACTION_LABELS,
-            "source": self.G.graph.get("source", ""),
-            "platform": {"machine": platform.machine(), "python": platform.python_version()},
-        }
 
     # ----------------------------------------------------------------------- geometry
     def point_along(self, position_pct):
@@ -314,6 +322,63 @@ class Engine:
             "exposures": exposures,
         }
 
+
+# --------------------------------------------------------------------------- engine
+class Engine:
+    def __init__(self):
+        self.spec = json.loads((ART / "feature_spec.json").read_text())
+        self.m1_features = self.spec["model1_features"]
+        self.m2_features = self.spec["model2_categorical"] + self.spec["model2_numeric"]
+        self.threshold = self.spec["risk_threshold"]
+        self.calm = self.spec["calm_reference"]
+        self.model1 = joblib.load(ART / "model1_rf.joblib")
+        self.model2 = joblib.load(ART / "model2_rf.joblib")
+        self.model1.set_params(n_jobs=1)
+        self.model2.set_params(rf__n_jobs=1)
+
+        # One scenario per location whose road graph has been downloaded (see webui/locations.py)
+        self.scenarios = {key: Scenario(key) for key, cfg in LOCATIONS.items() if cfg["graph"].exists()}
+
+        self._granite = None
+        self._granite_path = None
+        self._granite_error = None
+        self._granite_lock = threading.Lock()
+
+    # ----------------------------------------------------------------------- scenario description
+    def scenario(self, location=DEFAULT_LOCATION):
+        sc = self.get_scenario(location)
+        defaults = DISASTER_TYPES["flood"]
+        return {
+            "location": sc.key,
+            "label": sc.cfg["label"],
+            "context": sc.cfg["context"],
+            "locations": [{"key": k, "label": s.cfg["label"]} for k, s in self.scenarios.items()],
+            "names": sc.cfg["names"],
+            "route": sc.coords(sc.baseline),
+            "route_km": round(sc.route_km, 2),
+            "origin": sc.node_coords(sc.origin),
+            "destination": sc.node_coords(sc.destination),
+            "hub": sc.node_coords(sc.hub),
+            "threshold": self.threshold,
+            "disaster_types": {k: {"label": sc.type_label(k), "short": sc.type_short(k),
+                                   **{key: v[key] for key in ("color", "auto_factors", "disaster", "factors")}}
+                               for k, v in DISASTER_TYPES.items()},
+            "default_type": "flood",
+            "disaster_sliders": [{**s, "default": defaults["disaster"].get(s["key"], s["default"])}
+                                 for s in DISASTER_SLIDERS],
+            "factor_sliders": [{**s, "default": defaults["factors"].get(s["key"], s["default"])}
+                               for s in FACTOR_SLIDERS],
+            "cargo_slider": CARGO_SLIDER,
+            "actions": ACTION_LABELS,
+            "source": sc.G.graph.get("source", ""),
+            "platform": {"machine": platform.machine(), "python": platform.python_version()},
+        }
+
+    def get_scenario(self, location):
+        if location not in self.scenarios:
+            raise ValueError(f"location must be one of {sorted(self.scenarios)}")
+        return self.scenarios[location]
+
     # ----------------------------------------------------------------------- models
     def route_features(self, factors, dtype, metrics, delay_applies):
         f = {k: factors[k] for k in ("speed_kmh", "fuel_level_pct", "rainfall_mm_per_hr", "wind_speed_kmh",
@@ -344,6 +409,8 @@ class Engine:
     def parse(self, body):
         if not isinstance(body, dict):
             raise ValueError("request body must be a JSON object")
+        location = body.get("location", DEFAULT_LOCATION)
+        self.get_scenario(location)      # validates
         dtype = body.get("type", "flood")
         if dtype not in DISASTER_TYPES:
             raise ValueError(f"type must be one of {sorted(DISASTER_TYPES)}")
@@ -363,27 +430,29 @@ class Engine:
         overrides = [k for k in overrides if k in preset["auto_factors"]]
         cargo = int(round(_clamp(body.get("cargo_priority", CARGO_SLIDER["default"]), CARGO_SLIDER)))
         hub_allowed = bool(body.get("backup_hub_available", True))
-        return dtype, disaster, factors, overrides, cargo, hub_allowed
+        return location, dtype, disaster, factors, overrides, cargo, hub_allowed
 
     # ----------------------------------------------------------------------- main entry point
     def simulate(self, body):
         t0 = time.perf_counter()
-        dtype, disaster, factors, overrides, cargo, hub_allowed = self.parse(body)
+        location, dtype, disaster, factors, overrides, cargo, hub_allowed = self.parse(body)
+        sc = self.scenarios[location]
         preset = DISASTER_TYPES[dtype]
-        lat, lon = self.point_along(disaster["position_pct"])
+        lat, lon = sc.point_along(disaster["position_pct"])
         hazard = {"lat": lat, "lon": lon, "radius_km": disaster["radius_km"], "severity": disaster["severity"]}
-        field = self.hazard_field(hazard)
+        field = sc.hazard_field(hazard)
 
-        cur_m = self.route_metrics(self.baseline, field, hazard)
+        cur_m = sc.route_metrics(sc.baseline, field, hazard)
         auto = self.route_features(factors, dtype, cur_m, delay_applies=True)
         auto_factors = {k: auto[k] for k in preset["auto_factors"]}
         cur_f = {**auto, **{k: factors[k] for k in overrides}}
         risk = self.predict_risk(cur_f)
 
-        exposed = [[self.coords([u])[0], self.coords([v])[0]]
-                   for (u, v), e in zip(zip(self.baseline[:-1], self.baseline[1:]), cur_m["exposures"])
+        exposed = [[sc.coords([u])[0], sc.coords([v])[0]]
+                   for (u, v), e in zip(zip(sc.baseline[:-1], sc.baseline[1:]), cur_m["exposures"])
                    if e >= ZONE_THRESHOLD]
         result = {
+            "location": location,
             "type": dtype,
             "risk_score": round(risk, 3),
             "risk_level": self.risk_level(risk),
@@ -393,7 +462,7 @@ class Engine:
             "probabilities": None,
             "auto_factors": auto_factors,
             "model1_inputs": cur_f,
-            "hazard": {**hazard, "color": preset["color"], "label": preset["label"]},
+            "hazard": {**hazard, "color": preset["color"], "label": sc.type_label(dtype)},
             "hazard_segments": exposed,
             "distance_ahead_km": round(cur_m["distance_km"], 2),
             "routes": {"alternative": None, "hub": None},
@@ -402,25 +471,26 @@ class Engine:
                          "minutes": 0.0, "minutes_label": "extra", "available": True, "note": "current route"}],
         }
         facts = {
-            "disaster": preset["label"], "distance_ahead_km": result["distance_ahead_km"],
+            "disaster": sc.type_label(dtype), "location": sc.cfg["label"],
+            "distance_ahead_km": result["distance_ahead_km"],
             "risk_score": round(risk, 2), "risk_level": result["risk_level"], "threshold": self.threshold,
             "risk_drivers": [d["label"] for d in result["risk_drivers"]],
             "estimated_hazard_duration_min": disaster["duration_min"], "cargo_priority": cargo,
         }
 
         if risk >= self.threshold:
-            alt_path = self.safest_route(self.origin, self.destination, field)
-            alt_ok = alt_path is not None and alt_path != self.baseline
+            alt_path = sc.safest_route(sc.origin, sc.destination, field)
+            alt_ok = alt_path is not None and alt_path != sc.baseline
             if alt_ok:
-                alt_m = self.route_metrics(alt_path, field, hazard)
+                alt_m = sc.route_metrics(alt_path, field, hazard)
                 alt_risk = self.predict_risk(self.route_features(
                     factors, dtype, alt_m, delay_applies=alt_m["hazard_exposure"] >= ZONE_THRESHOLD))
                 detour = max(0.0, alt_m["travel_min"] - cur_m["travel_min"])
             else:
                 alt_risk, detour = 1.0, 0.0
-            hub_path = self.safest_route(self.origin, self.hub, field) if hub_allowed else None
+            hub_path = sc.safest_route(sc.origin, sc.hub, field) if hub_allowed else None
             if hub_path:
-                hub_m = self.route_metrics(hub_path, field, hazard)
+                hub_m = sc.route_metrics(hub_path, field, hazard)
                 hub_risk = self.predict_risk(self.route_features(
                     factors, dtype, hub_m, delay_applies=hub_m["hazard_exposure"] >= ZONE_THRESHOLD))
             hold_risk = self.predict_risk({**self.calm, "fuel_level_pct": factors["fuel_level_pct"]})
@@ -442,8 +512,8 @@ class Engine:
             proba = {str(c): round(float(p), 3) for c, p in zip(self.model2.classes_, self.model2.predict_proba(X2)[0])}
 
             result.update(action=action, probabilities=proba)
-            result["routes"] = {"alternative": self.coords(alt_path) if alt_ok else None,
-                                "hub": self.coords(hub_path) if hub_path else None}
+            result["routes"] = {"alternative": sc.coords(alt_path) if alt_ok else None,
+                                "hub": sc.coords(hub_path) if hub_path else None}
             result["options"] += [
                 {"action": "HOLD_POSITION", "label": "Halt", "risk": round(hold_risk, 3),
                  "minutes": float(disaster["duration_min"]), "minutes_label": "extra", "available": True,
