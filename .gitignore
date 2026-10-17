@@ -7,5 +7,8 @@ artifacts/
 data/*.csv
 logs/
 
+# Granite GGUF model files (multi-GB; download or use the container's model)
+models/
+
 # data/road_graph.json is intentionally NOT ignored: it is the cached OSM extract,
 # so the LinuxONE demo needs no internet access.
