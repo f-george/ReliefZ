@@ -176,7 +176,17 @@ def find_granite_model():
     env_path = os.getenv("GRANITE_GGUF_PATH")
     if env_path:
         return Path(env_path) if Path(env_path).is_file() else None
-    search = [ROOT / "models"]
+    if (ROOT / "models").is_dir():
+        local = next(_glob_granite(ROOT / "models"), None)
+        if local:
+            return local
+    try:   # the Granite model IBM preinstalls in the LinuxONE container (used by its Loan_Approval_Demo notebook)
+        from loan_demo.rag_utils import MODEL_PATH
+        if Path(MODEL_PATH).is_file():
+            return Path(MODEL_PATH)
+    except Exception:
+        pass
+    search = []
     spec_ = importlib.util.find_spec("loan_demo")    # IBM's sample package in the LinuxONE container
     if spec_ and spec_.origin:
         search.append(Path(spec_.origin).parent)
@@ -187,6 +197,10 @@ def find_granite_model():
             if match:
                 return match
     return None
+
+
+def _template_error(message):
+    raise ValueError(f"chat template error: {message}")   # some chat templates call raise_exception()
 
 
 def gguf_byte_order(path):
@@ -570,12 +584,15 @@ class Engine:
                 raise GraniteUnavailable(self._granite_error)
             messages = [{"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"Facts: {prompt_facts}\nExplain the recommended action."}]
-            prompt = self._granite_template.render(
-                messages=messages, add_generation_prompt=True, enable_thinking=False, bos_token="", eos_token="",
-                strftime_now=lambda fmt: time.strftime(fmt))
-            t0 = time.perf_counter()
-            out = self._granite.create_completion(prompt, temperature=0, max_tokens=160)
-            seconds = time.perf_counter() - t0
+            try:
+                prompt = self._granite_template.render(
+                    messages=messages, add_generation_prompt=True, enable_thinking=False, bos_token="",
+                    eos_token="", strftime_now=lambda fmt: time.strftime(fmt), raise_exception=_template_error)
+                t0 = time.perf_counter()
+                out = self._granite.create_completion(prompt, temperature=0, max_tokens=160)
+                seconds = time.perf_counter() - t0
+            except Exception as exc:
+                raise GraniteUnavailable(f"Granite call failed: {exc}") from exc
         return {"text": out["choices"][0]["text"].split("</think>")[-1].strip(),
                 "source": f"{self._granite_path.name} via llama.cpp (local)",
                 "latency_s": round(seconds, 1)}

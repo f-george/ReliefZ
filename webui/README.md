@@ -69,22 +69,39 @@ npm run build      # rebuild frontend/dist/ before committing
 
 ## Run on LinuxONE
 
-LinuxONE only needs Python and Flask; the React/Tailwind build happens on your laptop. Inside the LinuxONE Jupyter
-container (open a terminal from Jupyter Lab):
+LinuxONE only needs Python and Flask; the React/Tailwind build happens on your laptop. Before starting:
+- **Notebooks 01–03 have run on LinuxONE**, so `artifacts/` holds models trained with the container's scikit-learn.
+- **The repo is writable by the container user** (`chmod -R a+rwX` on the VM; see the main README). Notebook 00's
+  *Project readiness* cell checks both.
+
+Inside the LinuxONE Jupyter container (open a terminal from Jupyter Lab):
 
 ```bash
 cd ~/shared/ReliefZ
-pip install -r webui/requirements.txt
+pip install -r webui/requirements.txt  # Flask, pytest + 4 small dependencies, all pure Python (no compiling on s390x)
+python -m pytest webui/tests            # optional: about 15 s
 python webui/app.py                     # listens on 127.0.0.1:8050 only
+```
+
+If `pip install` reports a permission error, use `pip install --user -r webui/requirements.txt`. If the container has
+no internet access, download the wheels on your laptop, copy the folder over, and install from it with
+`pip install --no-index --find-links wheels -r webui/requirements.txt`. These wheels are pure Python, so the ones your
+laptop downloads also work on s390x:
+
+```bash
+pip download -d wheels -r webui/requirements.txt
 ```
 
 The app has no login, so it only listens locally by default. Reach it from your laptop through an SSH tunnel to the
 LinuxONE VM:
 
 ```bash
-ssh -L 8050:localhost:8050 linux1@<instance-public-IP>
+ssh -i <your key> -L 8050:localhost:8050 linux1@<instance-public-IP>
 # then open http://localhost:8050 on your laptop
 ```
+
+Shut down notebook 05's Jupyter kernel before clicking **Explain with Granite**, so the model isn't loaded into memory
+twice on the VM.
 
 The header shows **Running on s390x** when it is served from LinuxONE, which is useful evidence for the demo video.
 The container runs with `--network host`, so the tunnel reaches the app directly.

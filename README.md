@@ -48,26 +48,44 @@ See [webui/README.md](webui/README.md) for LinuxONE (SSH tunnel) and frontend de
 Use the official Jupyter Lab ML container (https://github.com/linuxone-community-cloud/jupyter-lab-ml). It already
 has scikit-learn, XGBoost, llama.cpp with the zDNN backend, and an IBM Granite model, so there is nothing to compile.
 
+On the LinuxONE VM (`ssh -i <your key> linux1@<instance-public-IP>`):
+
 ```bash
 docker pull registry.linuxone.cloud.marist.edu/l1cc/jupyterlab-image-s390x:latest
 mkdir -p /home/linux1/shared && chmod a+w /home/linux1/shared
 git clone <this repo> /home/linux1/shared/ReliefZ
+# Jupyter runs as a different user inside the container, so it must be able to write into the repo
+chmod -R a+rwX /home/linux1/shared/ReliefZ
 docker run --network host --name notebook -v /home/linux1/shared:/home/ibm-user/shared \
   -d registry.linuxone.cloud.marist.edu/l1cc/jupyterlab-image-s390x:latest
 sudo iptables -I INPUT -p tcp --dport 38888 -j ACCEPT
 # open http://<instance-public-IP>:38888 and go to shared/ReliefZ/notebooks
 ```
 
-Then:
-1. Run `00` and screenshot it. It should show `s390x`, big-endian byte order, the container, and the zDNN library.
-2. Run `01` → `06` in order. Retrain on LinuxONE rather than copying `.joblib` files: training takes about a minute,
-   and it is stronger evidence of a live workload. `data/road_graph.json` is in the repo, so no internet is needed.
-3. In `05`, check that the explanation source names a Granite `.gguf` file, not "template". If it says "template":
-   - set `GRANITE_GGUF_PATH` to the container's Granite model;
-   - or convert a Hugging Face GGUF to big-endian with llama.cpp's `gguf_convert_endian.py <file> big`.
-   IBM Z is big-endian, and models downloaded from Hugging Face are little-endian.
-4. Screenshot `docker ps`, `top` or `htop` during notebook 06, and the outputs of notebooks 05 and 06, for the
-   video and the technical-design score.
+Then, in Jupyter on LinuxONE:
+1. **Run `00` and screenshot it.** It should show `s390x`, big-endian byte order, the container, and the zDNN library.
+   Its last cell, *Project readiness*, should show no FAIL lines.
+2. **Run `01` → `06` in order.** Retrain on LinuxONE rather than copying `.joblib` files: training takes about a
+   minute, and it is stronger evidence of a live workload. The road networks are in the repo, so no internet is needed.
+3. **In `05`, check the explanation source.** It should name a Granite `.gguf` file, not "template". Notebook 05 finds
+   the container's preinstalled Granite model automatically (`loan_demo.rag_utils.MODEL_PATH`). If it still says
+   "template", set `GRANITE_GGUF_PATH` to a big-endian GGUF: IBM Z is big-endian, and models downloaded from Hugging
+   Face are little-endian (convert with llama.cpp's `gguf_convert_endian.py <file> big`).
+4. **Start the web UI** from a Jupyter terminal; see [webui/README.md](webui/README.md). Shut down notebook 05's kernel
+   first, so Granite isn't loaded into memory twice.
+5. **Take screenshots for the video and the technical-design score:** `docker ps`, `top` or `htop` during notebook 06,
+   the outputs of notebooks 05 and 06, and the web UI header showing "Running on s390x".
+
+### What runs where
+
+| Step | Where | Why |
+|---|---|---|
+| Notebooks 00–06: environment check, training, routing, live demo, benchmark | **LinuxONE** | The models must be trained with the container's scikit-learn, and this is the workload judges want to see |
+| Web UI server (`webui/app.py`) and its tests | **LinuxONE** | Pure Python; only Flask needs installing |
+| Viewing the web UI and Jupyter, recording the video | **Your laptop's browser** | Through the SSH tunnel / port 38888 |
+| Building the web UI frontend (`npm run build`) | **Laptop only** | Tailwind CSS has no s390x build; the built `webui/frontend/dist/` is committed |
+| Downloading road networks from OpenStreetMap | **Laptop** (already done) | One-off; the results in `data/` are committed |
+| Downloading a Granite model from Hugging Face | **Laptop only** (for local testing) | LinuxONE uses the container's own big-endian Granite model |
 
 ## Running locally (x86 / ARM)
 
