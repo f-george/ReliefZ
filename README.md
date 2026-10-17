@@ -1,6 +1,6 @@
 # ReliefSync Z_IBM Z Datathon 2026 Project
 
-**Team:** ReliefSync Z · **Theme:** Real-time AI for critical decisions · **Event code:** SSF2026
+**Team:** ReliefSync Z · **Theme:** Real-time AI for critical decisions ·
 
 ReliefSync Z is a hybrid-AI decision-support system for disaster relief convoys, running on IBM LinuxONE. When a
 flood, storm or landslide threatens a convoy's route, it:
