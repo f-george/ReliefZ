@@ -25,6 +25,23 @@ the libraries, model and data used, with links and licences.
 
 `05` loads `04` with `%run`, so the routing functions live in one place.
 
+## Interactive web UI (`webui/`)
+
+A browser-based disaster simulator for the demo video:
+- choose a flood, severe storm or landslide;
+- place it anywhere along the convoy's fixed route;
+- adjust every risk factor with sliders.
+
+It shows the live decision (CONTINUE / HALT / REROUTE / DIVERT TO HUB) on a map, compares the route options, and
+can ask Granite to explain the decision. It uses Flask + React + Tailwind CSS, and needs notebooks 01–04 to have run.
+
+```bash
+.venv/bin/pip install -r webui/requirements.txt
+.venv/bin/python webui/app.py      # → http://127.0.0.1:8050
+```
+
+See [webui/README.md](webui/README.md) for LinuxONE (SSH tunnel) and frontend development.
+
 ## Running on LinuxONE Community Cloud
 
 Use the official Jupyter Lab ML container (https://github.com/linuxone-community-cloud/jupyter-lab-ml). It already

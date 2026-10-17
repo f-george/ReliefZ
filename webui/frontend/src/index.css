@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+body {
+  @apply bg-slate-100 text-slate-900 antialiased;
+}
+
+.leaflet-container {
+  font: inherit;
+}

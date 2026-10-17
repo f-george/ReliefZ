@@ -7,6 +7,10 @@ artifacts/
 data/*.csv
 logs/
 
+# Web UI: dependencies are installed with `npm ci`; the built frontend/dist/ IS committed
+webui/frontend/node_modules/
+.pytest_cache/
+
 # Granite GGUF model files (multi-GB; download or use the container's model)
 models/
 
